@@ -16,6 +16,7 @@
 #include <xcb/xcb_aux.h>
 
 #include "lib/log.h"
+#include "lib/memory.h"
 
 /*
  * Most of the code I got from xcmenu, so there we can found some answers to
@@ -113,6 +114,44 @@ static int init_clipboard_protocol(void)
 	return 0;
 }
 
+static int handle_selection_notify(xcb_generic_event_t* event)
+{
+	xcb_selection_notify_event_t* event_notify = NULL;
+
+	DEBUG("handling selection_notify");
+
+	event_notify = (xcb_selection_notify_event_t*) event; 
+	if (event_notify->selection == XCB_ATOM_PRIMARY
+		&& event_notify->property != XCB_NONE) {
+		xcb_icccm_get_text_property_reply_t prop;
+		xcb_get_property_cookie_t cookie =
+		    xcb_icccm_get_text_property(xcb,
+		                                event_notify->requestor,
+		                                event_notify->property);
+
+		if (xcb_icccm_get_text_property_reply(xcb,
+						      cookie, &prop, NULL)) {
+			DEBUG("%s", prop.name);
+
+			xcb_icccm_get_text_property_reply_wipe(&prop);
+
+			xcb_delete_property(xcb,
+					    event_notify->requestor,
+					    event_notify->property);
+
+			free_event(&event);
+
+		}
+	}
+	return 0;
+}
+
+static int handle_property_notify(xcb_generic_event_t* event)
+{
+	DEBUG("handling property_notify");
+	return 0;
+}
+
 int selection_get(void)
 {
 	xcb_generic_error_t* error = NULL;
@@ -137,6 +176,7 @@ int selection_get(void)
 	xcb_generic_event_t* event;
 
 	DEBUG("Starting while");
+
 	while ((event = xcb_wait_for_event(xcb))) {
 		if (event == NULL) {
 			DEBUG("xcb I/O error while waiting event");
@@ -159,40 +199,22 @@ int selection_get(void)
 		      xcb_event_get_label(event->response_type),
 		      event->response_type);
 
-		if (XCB_EVENT_RESPONSE_TYPE(event) != XCB_SELECTION_NOTIFY) {
+		switch (XCB_EVENT_RESPONSE_TYPE(event)) {
+		case XCB_SELECTION_NOTIFY:
+			handle_selection_notify(event);
+			break;
+		case XCB_PROPERTY_NOTIFY:
+			handle_property_notify(event);
+			break;
+		default:
 			DEBUG("Unknown event.");
-			free(event);
+			free_event(&event);
 			continue;
 		}
 
-		xcb_selection_notify_event_t* event_notify =
-		    (xcb_selection_notify_event_t*) event;
-
-		if (event_notify->selection == XCB_ATOM_PRIMARY
-		        && event_notify->property != XCB_NONE) {
-			xcb_icccm_get_text_property_reply_t prop;
-			xcb_get_property_cookie_t cookie =
-			    xcb_icccm_get_text_property(xcb,
-			                                event_notify->requestor,
-			                                event_notify->property);
-
-			if (xcb_icccm_get_text_property_reply(xcb,
-			                                      cookie, &prop, NULL)) {
-				DEBUG("%s", prop.name);
-
-				xcb_icccm_get_text_property_reply_wipe(&prop);
-
-				xcb_delete_property(xcb,
-				                    event_notify->requestor,
-				                    event_notify->property);
-
-				free(event);
-
-			}
-		}
 	}
 
-	free(event);
+	free_event(&event);
 	return 0;
 }
 
