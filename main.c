@@ -118,8 +118,8 @@ int selection_get(void)
 	xcb_generic_error_t* error = NULL;
 
 	xcb_convert_selection(xcb, xcbw,
-	                      XCB_ATOM_PRIMARY, UTF8_STRING, XSEL_DATA,
-	                      XCB_CURRENT_TIME);
+	                      XCB_ATOM_PRIMARY, atoms[UTF8_STRING],
+	                      atoms[XSEL_DATA], XCB_CURRENT_TIME);
 	xcb_flush(xcb);
 
 	if (xcb_connection_has_error(xcb)) {
