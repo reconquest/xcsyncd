@@ -46,23 +46,13 @@ const char* atoms_names[] = {
 
 static xcb_atom_t atoms[ATOMS_COUNT];
 
-/** timeout to get xsel calls */
-static int xcb_timeout_xsel_s = 0;
-static int xcb_timeout_xsel_ns = 0;
-
-/** timeout to xcb wait calls from command line */
-static int xcb_timeout_daemon = 5000;	/// in nanoseconds
-static int xcb_timeout_loop = 25000 * 25;
-
 static void init_window(void)
 {
-	// XXX: do we really need OVERRIDE_REDIRECT here?
 	uint32_t mask = XCB_CW_BACK_PIXEL |
 	                XCB_CW_OVERRIDE_REDIRECT |
 	                XCB_CW_EVENT_MASK;
 	uint32_t value[3] = {0};
 
-	// XXX: no checks of return values.
 	xcb_screen = xcb_setup_roots_iterator(xcb_get_setup(xcb)).data;
 
 	value[0] = xcb_screen->black_pixel;
@@ -114,35 +104,47 @@ static int init_clipboard_protocol(void)
 	return 0;
 }
 
-static int handle_selection_notify(xcb_generic_event_t* event)
+
+static int handle_selection_request(xcb_selection_request_event_t* event)
 {
-	xcb_selection_notify_event_t* event_notify = NULL;
+	DEBUG("handling selection_request");
+	return 0;
+}
+
+
+static int handle_selection_notify(xcb_selection_notify_event_t* event)
+{
 
 	DEBUG("handling selection_notify");
 
-	event_notify = (xcb_selection_notify_event_t*) event; 
-	if (event_notify->selection == XCB_ATOM_PRIMARY
-		&& event_notify->property != XCB_NONE) {
+	if (event->selection != XCB_ATOM_PRIMARY) {
+		return 0;
+	}
+
+	if (event->property != XCB_NONE) {
 		xcb_icccm_get_text_property_reply_t prop;
 		xcb_get_property_cookie_t cookie =
 		    xcb_icccm_get_text_property(xcb,
-		                                event_notify->requestor,
-		                                event_notify->property);
+		                                event->requestor,
+		                                event->property);
 
 		if (xcb_icccm_get_text_property_reply(xcb,
 						      cookie, &prop, NULL)) {
-			DEBUG("%s", prop.name);
+			DEBUG("Primary clipboard has: %s", prop.name);
 
 			xcb_icccm_get_text_property_reply_wipe(&prop);
 
 			xcb_delete_property(xcb,
-					    event_notify->requestor,
-					    event_notify->property);
-
-			free_event(&event);
-
+					    event->requestor,
+					    event->property);
 		}
 	}
+	return 0;
+}
+
+static int handle_selection_clear(xcb_selection_clear_event_t* event)
+{
+	DEBUG("handling property_notify");
 	return 0;
 }
 
@@ -152,32 +154,45 @@ static int handle_property_notify(xcb_generic_event_t* event)
 	return 0;
 }
 
+static int handle_events(xcb_generic_event_t* event)
+{
+	DEBUG("Got an event: %s (%d)",
+	      xcb_event_get_label(event->response_type),
+	      event->response_type);
+
+	switch (XCB_EVENT_RESPONSE_TYPE(event)) {
+	case XCB_SELECTION_REQUEST:
+		handle_selection_request((xcb_selection_request_event_t*)event);
+		break;
+	case XCB_SELECTION_NOTIFY:
+		handle_selection_notify((xcb_selection_notify_event_t*)event);
+		break;
+	case XCB_SELECTION_CLEAR:
+		handle_selection_clear((xcb_selection_clear_event_t*)event);
+	case XCB_PROPERTY_NOTIFY:
+		handle_property_notify((void*)event);
+		break;
+	default:
+		DEBUG("Unknown event.");
+		break;
+	}
+
+	return 0;
+}
+
 int selection_get(void)
 {
 	xcb_generic_error_t* error = NULL;
 
-	xcb_convert_selection(xcb, xcbw,
-	                      XCB_ATOM_PRIMARY, atoms[UTF8_STRING],
-	                      atoms[XSEL_DATA], XCB_CURRENT_TIME);
-	xcb_flush(xcb);
-
-	if (xcb_connection_has_error(xcb)) {
-		ERR("convert selection error");
-		return 1;
-	}
-
-	if (xcb_poll_for_event(xcb) != NULL) {
-		ERR("another window manager is already running");
-		return 1;
-	};
-
-	xcb_flush(xcb);
-
 	xcb_generic_event_t* event;
 
-	DEBUG("Starting while");
+	xcb_convert_selection(xcb, xcbw,
+                              XCB_ATOM_PRIMARY, atoms[UTF8_STRING],
+                              atoms[XSEL_DATA], XCB_CURRENT_TIME);
+	xcb_flush(xcb);
 
 	while ((event = xcb_wait_for_event(xcb))) {
+		// handling errors if any
 		if (event == NULL) {
 			DEBUG("xcb I/O error while waiting event");
 			return 1;
@@ -190,31 +205,18 @@ int selection_get(void)
 			    error->error_code);
 
 			if (xcb_connection_has_error(xcb)) {
-				ERR("convert selection error");
+				ERR("XCB connection error");
 				return 1;
 			}
 		}
 
-		DEBUG("Got an event: %s (%d)",
-		      xcb_event_get_label(event->response_type),
-		      event->response_type);
+		// handling events
+		handle_events(event);
 
-		switch (XCB_EVENT_RESPONSE_TYPE(event)) {
-		case XCB_SELECTION_NOTIFY:
-			handle_selection_notify(event);
-			break;
-		case XCB_PROPERTY_NOTIFY:
-			handle_property_notify(event);
-			break;
-		default:
-			DEBUG("Unknown event.");
-			free_event(&event);
-			continue;
-		}
-
+		// freeing event object
+		free_event(&event);
 	}
 
-	free_event(&event);
 	return 0;
 }
 
@@ -224,14 +226,13 @@ int main()
 
 	xcb = xcb_connect(NULL, NULL);
 
-	init_window();
-	init_clipboard_protocol();
-	xcb_flush(xcb);
-
 	if (xcb_connection_has_error(xcb)) {
 		goto xcb_fail;
 	}
 
+	init_window();
+	init_clipboard_protocol();
+	xcb_flush(xcb);
 	selection_get();
 
 	goto out;
