@@ -144,7 +144,7 @@ static int handle_selection_notify(xcb_selection_notify_event_t* event)
 
 static int handle_selection_clear(xcb_selection_clear_event_t* event)
 {
-	DEBUG("handling property_notify");
+	DEBUG("handling selection_clear");
 	return 0;
 }
 
