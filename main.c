@@ -65,18 +65,8 @@ static void init_window(void)
 	                  0, 0, 1, 1, 0, XCB_COPY_FROM_PARENT,
 	                  xcb_screen->root_visual, mask, value);
 
-	if (xcb_connection_has_error(xcb)) {
-		ERR("create_window error");
-		return;
-	}
-
 	xcb_map_window(xcb, xcbw);
 	xcb_flush(xcb);
-
-	if (xcb_connection_has_error(xcb)) {
-		ERR("map_window error");
-		return;
-	}
 }
 
 static int init_clipboard_protocol(void)
@@ -148,7 +138,7 @@ static int handle_selection_clear(xcb_selection_clear_event_t* event)
 	return 0;
 }
 
-static int handle_property_notify(xcb_generic_event_t* event)
+static int handle_property_notify(xcb_property_notify_event_t* event)
 {
 	DEBUG("handling property_notify");
 	return 0;
@@ -170,7 +160,7 @@ static int handle_events(xcb_generic_event_t* event)
 	case XCB_SELECTION_CLEAR:
 		handle_selection_clear((xcb_selection_clear_event_t*)event);
 	case XCB_PROPERTY_NOTIFY:
-		handle_property_notify((void*)event);
+		handle_property_notify((xcb_property_notify_event_t*)event);
 		break;
 	default:
 		DEBUG("Unknown event.");
@@ -187,8 +177,8 @@ int selection_get(void)
 	xcb_generic_event_t* event;
 
 	xcb_convert_selection(xcb, xcbw,
-                              XCB_ATOM_PRIMARY, atoms[UTF8_STRING],
-                              atoms[XSEL_DATA], XCB_CURRENT_TIME);
+			      XCB_ATOM_PRIMARY, atoms[UTF8_STRING],
+			      atoms[XSEL_DATA], XCB_CURRENT_TIME);
 	xcb_flush(xcb);
 
 	while ((event = xcb_wait_for_event(xcb))) {
