@@ -14,6 +14,7 @@
 #include <xcb/xcb_event.h>
 #include <xcb/xcb_icccm.h>
 #include <xcb/xcb_aux.h>
+#include <xcb/xfixes.h>
 
 #include "lib/log.h"
 #include "lib/memory.h"
@@ -32,6 +33,8 @@ static xcb_connection_t* xcb;
 static xcb_window_t xcbw;
 static xcb_screen_t* xcb_screen;
 
+static uint8_t xcb_extension_first_event = 0;
+
 // xcb atoms
 enum {
 	UTF8_STRING = 0,
@@ -45,6 +48,10 @@ const char* atoms_names[] = {
 };
 
 static xcb_atom_t atoms[ATOMS_COUNT];
+
+//static functions declarations 
+
+static int handle_property_notify(xcb_property_notify_event_t* event);
 
 static void init_window(void)
 {
@@ -94,6 +101,39 @@ static int init_clipboard_protocol(void)
 	return 0;
 }
 
+static int print_selection(xcb_window_t requestor, xcb_atom_t property) {
+	xcb_generic_event_t* event = NULL;
+	xcb_icccm_get_text_property_reply_t prop;
+	xcb_get_property_cookie_t cookie =
+	    xcb_icccm_get_text_property(xcb, requestor, property);
+
+	if (xcb_icccm_get_text_property_reply(xcb, cookie, &prop, NULL)) {
+		DEBUG("Primary clipboard has: %s", prop.name);
+
+		xcb_icccm_get_text_property_reply_wipe(&prop);
+
+		xcb_delete_property(xcb, requestor, property);
+		xcb_flush(xcb);
+
+		event = xcb_wait_for_event(xcb);
+		if (event == NULL) {
+			DEBUG("Didn't received any events in print selection");
+			return 0;
+		}
+
+		if (XCB_EVENT_RESPONSE_TYPE(event) == XCB_PROPERTY_NOTIFY) {
+			DEBUG("Handling property notify from print selection.");
+			handle_property_notify((xcb_property_notify_event_t*)event);
+		}
+		else {
+			DEBUG("Received not PROPERTY_NOTIFY event: %d",
+			      XCB_EVENT_RESPONSE_TYPE(event));
+		}
+	}
+
+	return 0;
+}
+
 
 static int handle_selection_request(xcb_selection_request_event_t* event)
 {
@@ -101,34 +141,20 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 	return 0;
 }
 
-
 static int handle_selection_notify(xcb_selection_notify_event_t* event)
 {
+	// TODO: We can implement incremential copying of big selections, but do
+	// we really need to put it in clipboard? What if 100Gb of data there?
 
 	DEBUG("handling selection_notify");
 
-	if (event->selection != XCB_ATOM_PRIMARY) {
+	if (event->selection != XCB_ATOM_PRIMARY ||
+	        event->property == XCB_NONE) {
 		return 0;
 	}
 
-	if (event->property != XCB_NONE) {
-		xcb_icccm_get_text_property_reply_t prop;
-		xcb_get_property_cookie_t cookie =
-		    xcb_icccm_get_text_property(xcb,
-		                                event->requestor,
-		                                event->property);
+	print_selection(event->requestor, event->property);
 
-		if (xcb_icccm_get_text_property_reply(xcb,
-						      cookie, &prop, NULL)) {
-			DEBUG("Primary clipboard has: %s", prop.name);
-
-			xcb_icccm_get_text_property_reply_wipe(&prop);
-
-			xcb_delete_property(xcb,
-					    event->requestor,
-					    event->property);
-		}
-	}
 	return 0;
 }
 
@@ -138,9 +164,34 @@ static int handle_selection_clear(xcb_selection_clear_event_t* event)
 	return 0;
 }
 
+static int handle_xfixes_selection_notify(xcb_xfixes_selection_notify_event_t* event)
+{
+	DEBUG("handling xfixes_selection_notify");
+
+	if (event->selection != XCB_ATOM_PRIMARY) {
+		return 0;
+	}
+
+	// requesting for selection conversion to get the new value. Event
+	// will be handled in main event loop.
+	xcb_convert_selection(xcb, xcbw,
+	                      XCB_ATOM_PRIMARY, atoms[UTF8_STRING],
+	                      atoms[XSEL_DATA], XCB_CURRENT_TIME);
+	xcb_flush(xcb);
+
+	return 0;
+}
+
 static int handle_property_notify(xcb_property_notify_event_t* event)
 {
 	DEBUG("handling property_notify");
+	if (event->atom == atoms[XSEL_DATA]) {
+		DEBUG("XSEL_DATA property changed");
+	}
+	else {
+		DEBUG("Some other property changed: 0x%x", event->atom);
+	}
+
 	return 0;
 }
 
@@ -154,16 +205,27 @@ static int handle_events(xcb_generic_event_t* event)
 	case XCB_SELECTION_REQUEST:
 		handle_selection_request((xcb_selection_request_event_t*)event);
 		break;
+
 	case XCB_SELECTION_NOTIFY:
 		handle_selection_notify((xcb_selection_notify_event_t*)event);
 		break;
+
 	case XCB_SELECTION_CLEAR:
 		handle_selection_clear((xcb_selection_clear_event_t*)event);
+
 	case XCB_PROPERTY_NOTIFY:
 		handle_property_notify((xcb_property_notify_event_t*)event);
 		break;
+
 	default:
-		DEBUG("Unknown event.");
+		if (XCB_EVENT_RESPONSE_TYPE(event) ==
+		    xcb_extension_first_event + XCB_XFIXES_SELECTION_NOTIFY) {
+			handle_xfixes_selection_notify((xcb_xfixes_selection_notify_event_t*)event);
+		}
+		else {
+			DEBUG("Unknown event.");
+		}
+
 		break;
 	}
 
@@ -180,6 +242,12 @@ int selection_get(void)
 			      XCB_ATOM_PRIMARY, atoms[UTF8_STRING],
 			      atoms[XSEL_DATA], XCB_CURRENT_TIME);
 	xcb_flush(xcb);
+
+	xcb_discard_reply(xcb, xcb_xfixes_query_version(xcb, 1, 0).sequence);
+	xcb_xfixes_select_selection_input(xcb, xcbw, XCB_ATOM_PRIMARY,
+	             XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER |
+	             XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY |
+	             XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE);
 
 	while ((event = xcb_wait_for_event(xcb))) {
 		// handling errors if any
@@ -210,6 +278,19 @@ int selection_get(void)
 	return 0;
 }
 
+int check_xfixes(void)
+{
+	const xcb_query_extension_reply_t* reply;
+
+	reply = xcb_get_extension_data(xcb, &xcb_xfixes_id);
+	if (!reply || !reply->present ) {
+		return -1;
+	}
+	xcb_extension_first_event = reply->first_event;
+
+	return 0;
+}
+
 int main()
 {
 	int ret = EXIT_SUCCESS;
@@ -217,20 +298,24 @@ int main()
 	xcb = xcb_connect(NULL, NULL);
 
 	if (xcb_connection_has_error(xcb)) {
-		goto xcb_fail;
+		ERR("XCB connection failed.");
+		goto err_out;
+	}
+
+	if (check_xfixes() != 0) {
+		ERR("XFixes extension is not present!");
+		goto err_out;
 	}
 
 	init_window();
 	init_clipboard_protocol();
-	xcb_flush(xcb);
+
 	selection_get();
 
 	goto out;
 
-xcb_fail:
-	ERR("XCB connection failed.");
+err_out:
 	ret = EXIT_FAILURE;
-
 out:
 	xcb_disconnect(xcb);
 	return ret;
