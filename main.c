@@ -238,16 +238,12 @@ int selection_get(void)
 
 	xcb_generic_event_t* event;
 
-	xcb_convert_selection(xcb, xcbw,
-			      XCB_ATOM_PRIMARY, atoms[UTF8_STRING],
-			      atoms[XSEL_DATA], XCB_CURRENT_TIME);
-	xcb_flush(xcb);
-
 	xcb_discard_reply(xcb, xcb_xfixes_query_version(xcb, 1, 0).sequence);
 	xcb_xfixes_select_selection_input(xcb, xcbw, XCB_ATOM_PRIMARY,
 	             XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER |
 	             XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY |
 	             XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE);
+	xcb_flush(xcb);
 
 	while ((event = xcb_wait_for_event(xcb))) {
 		// handling errors if any
