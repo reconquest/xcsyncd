@@ -25,7 +25,29 @@
  */
 
 #define LENGTH(x) (sizeof(x)/sizeof(*(x)))
-#define ERRORS_NBR	256;
+#define ERRORS_NBR      256
+#define MAX_INCR        UINT_MAX
+
+// types definitions
+
+/**
+ * @brief This structure handles imformation about incremential transfer.
+ */
+typedef struct incrtransfer {
+	xcb_window_t requestor;
+	xcb_atom_t property;
+	xcb_atom_t selection;
+	unsigned int time;
+	xcb_atom_t target;
+	int format;
+	void* data;
+	size_t size;
+	size_t offset;
+	size_t max_size;
+	size_t chunk;
+	struct incrtransfer* next;
+} incrtransfer;
+
 
 // global variables
 
@@ -38,18 +60,31 @@ static uint8_t xcb_extension_first_event = 0;
 // xcb atoms
 enum {
 	UTF8_STRING = 0,
+	STRING,
 	XSEL_DATA,
+	CLIPBOARD,
+	INCR,
 	ATOMS_COUNT,
 };
 
 const char* atoms_names[] = {
 	"UTF8_STRING",
+	"STRING",
 	"XSEL_DATA",
+	"CLIPBOARD",
+	"INCR",
 };
 
 static xcb_atom_t atoms[ATOMS_COUNT];
 
-//static functions declarations 
+// incremential transfers
+static incrtransfer* transfers;
+
+// selection data buffer
+void* clipboard_data;
+
+
+//static functions declarations
 
 static int handle_property_notify(xcb_property_notify_event_t* event);
 
@@ -101,13 +136,15 @@ static int init_clipboard_protocol(void)
 	return 0;
 }
 
-static int print_selection(xcb_window_t requestor, xcb_atom_t property) {
+static int print_selection(xcb_window_t requestor, xcb_atom_t property)
+{
 	xcb_generic_event_t* event = NULL;
 	xcb_icccm_get_text_property_reply_t prop;
 	xcb_get_property_cookie_t cookie =
 	    xcb_icccm_get_text_property(xcb, requestor, property);
 
 	if (xcb_icccm_get_text_property_reply(xcb, cookie, &prop, NULL)) {
+		//XXX: valgrind found the error here
 		DEBUG("Primary clipboard has: %s", prop.name);
 
 		xcb_icccm_get_text_property_reply_wipe(&prop);
@@ -129,15 +166,218 @@ static int print_selection(xcb_window_t requestor, xcb_atom_t property) {
 			DEBUG("Received not PROPERTY_NOTIFY event: %d",
 			      XCB_EVENT_RESPONSE_TYPE(event));
 		}
+
+		free(event);
+		event = NULL;
 	}
 
 	return 0;
 }
 
+void* fetch_selection(xcb_window_t win, xcb_atom_t property, xcb_atom_t type,
+                      size_t* len)
+{
+	xcb_get_property_reply_t* reply = NULL;
+	xcb_get_property_cookie_t cookie;
+	void* data, *string = NULL;
+	size_t val_len;
+	*len = 0;
+
+	if (!property) {
+		return NULL;
+	}
+
+	cookie = xcb_get_property(xcb, 0, win, property, type, 0, UINT_MAX);
+
+	if (!(reply = xcb_get_property_reply(xcb, cookie, 0))) {
+		return NULL;
+	}
+
+	val_len = xcb_get_property_value_length(reply);
+
+	if (val_len == 0) {
+		goto out;
+	}
+
+	data = xcb_get_property_value(reply);
+
+	if (data == NULL) {
+		goto out;
+	}
+
+	uint8_t format = reply->format;
+
+	if (format < 8) {
+		format = 8;
+	}
+
+	size_t rlen = val_len * format / 8;
+
+	if (!(string = calloc(1, rlen + 1))) {
+		goto out;
+	}
+
+	memcpy(string, data, rlen);
+	*len = rlen;
+	xcb_delete_property(xcb, win, property);
+
+out:
+	free(reply);
+	return string;
+}
+
+static int primary2clipboard(xcb_selection_notify_event_t* event)
+{
+	int ret = 0;
+	void* data = NULL;
+	size_t data_len = 0;
+
+	xcb_get_selection_owner_reply_t* reply = NULL;
+
+	// own the clipboard
+	xcb_set_selection_owner(xcb, xcbw, atoms[CLIPBOARD], XCB_CURRENT_TIME);
+	reply = xcb_get_selection_owner_reply(
+	            xcb,
+	            xcb_get_selection_owner(xcb,
+	                                    atoms[CLIPBOARD]),
+	            NULL);
+
+	if (reply != NULL && reply->owner == xcbw) {
+		ret = 1;
+		goto out;
+	}
+
+	// copy selection data
+	if (clipboard_data) {
+		free(clipboard_data);
+		clipboard_data = NULL;
+	}
+
+	clipboard_data = fetch_selection(event->requestor, event->property,
+	                                 event->target, &data_len);
+
+	if (clipboard_data == NULL) {
+		ret = 1;
+		goto out;
+	}
+
+out:
+	free(reply);
+	return ret;
+}
+
+static void add_incr(incrtransfer* incr)
+{
+	incrtransfer* i;
+	incr->next = NULL;
+
+	for (i = transfers; i && i->next; i = i->next) {}
+
+	if (!i) {
+		i = transfers = malloc(sizeof(incrtransfer));
+	}
+	else {
+		i = i->next = malloc(sizeof(incrtransfer));
+	}
+
+	if (!i) {
+		return;
+	}
+
+	memcpy(i, incr, sizeof(incrtransfer));
+}
+
+static int _xcb_change_property(xcb_selection_notify_event_t* ev,
+                                xcb_atom_t target, int format, size_t size,
+                                void* data)
+{
+	unsigned int bytes;
+	uint8_t mode = XCB_PROP_MODE_REPLACE;
+
+	/* not possible */
+	if (!data || !size) {
+		return -1;
+	}
+
+	bytes = size * format / 8;
+	DEBUG("check %zu bytes", bytes);
+
+	if (bytes < MAX_INCR) {
+		xcb_change_property(xcb, mode, ev->requestor,
+		                    ev->property, target, format,
+		                    size, data);
+		return 0;
+	}
+
+	/* INCR transfer */
+	ev->target = atoms[INCR];
+	xcb_change_window_attributes(xcb, ev->requestor, XCB_CW_EVENT_MASK,
+	&(unsigned int) {
+		XCB_EVENT_MASK_PROPERTY_CHANGE
+	});
+	xcb_change_property(xcb, mode, ev->requestor, ev->property, atoms[INCR], 32, 1,
+	                    (unsigned char*)&bytes);
+	xcb_send_event(xcb, 0, ev->requestor, XCB_EVENT_MASK_NO_EVENT, (char*)ev);
+	xcb_flush(xcb);
+
+
+	incrtransfer incr;
+	incr.requestor = ev->requestor;
+	incr.property  = ev->property;
+	incr.selection = ev->selection;
+	incr.time      = ev->time;
+	incr.target    = target;
+	incr.format    = format;
+	incr.data      = data;
+	incr.size      = size;
+	incr.offset    = 0;
+	incr.max_size  = MAX_INCR * 8 / format;
+	incr.chunk = incr.max_size < incr.size - incr.offset ?
+	             incr.max_size : incr.size - incr.offset;
+	add_incr(&incr);
+
+	DEBUG("\4INCR transfer! (%zu/%zu)", incr.size, incr.max_size);
+	return 1;
+}
 
 static int handle_selection_request(xcb_selection_request_event_t* event)
 {
 	DEBUG("handling selection_request");
+
+	int incr = 0;
+	xcb_selection_notify_event_t notify_event;
+
+	if (event->selection != atoms[CLIPBOARD]) {
+		DEBUG("We don't handle requests for this selection: 0x%x.",
+		      event->selection);
+		return 1;
+	}
+
+	notify_event.response_type = XCB_SELECTION_NOTIFY;
+	notify_event.target = event->target;
+	notify_event.requestor = event->requestor;
+	notify_event.selection = event->selection;
+	notify_event.time = event->time;
+	notify_event.property = event->property;
+
+	if (event->target == atoms[UTF8_STRING]) {
+		incr = _xcb_change_property(&notify_event, atoms[UTF8_STRING],
+		                            8, strlen(clipboard_data),
+		                            clipboard_data);
+	}
+	else {
+		DEBUG("We don't handle this targets requests yet.");
+		return 1;
+	}
+
+	if (!incr && incr != -1) {
+		DEBUG("sent: %s [%u]",
+		      (char*)clipboard_data, strlen((char*)clipboard_data));
+		xcb_send_event(xcb, 0, event->requestor,
+		               XCB_EVENT_MASK_NO_EVENT, (char*)&notify_event);
+		xcb_flush(xcb);
+	}
+
 	return 0;
 }
 
@@ -153,7 +393,10 @@ static int handle_selection_notify(xcb_selection_notify_event_t* event)
 		return 0;
 	}
 
-	print_selection(event->requestor, event->property);
+	if (!primary2clipboard(event)) {
+		DEBUG("Can't own clipboard or get data.")
+		return 1;
+	}
 
 	return 0;
 }
