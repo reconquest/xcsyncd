@@ -153,6 +153,7 @@ static int print_selection(xcb_window_t requestor, xcb_atom_t property)
 		xcb_flush(xcb);
 
 		event = xcb_wait_for_event(xcb);
+
 		if (event == NULL) {
 			DEBUG("Didn't received any events in print selection");
 			return 0;
@@ -385,7 +386,6 @@ static int handle_selection_notify(xcb_selection_notify_event_t* event)
 {
 	// TODO: We can implement incremential copying of big selections, but do
 	// we really need to put it in clipboard? What if 100Gb of data there?
-
 	DEBUG("handling selection_notify");
 
 	if (event->selection != XCB_ATOM_PRIMARY ||
@@ -407,7 +407,8 @@ static int handle_selection_clear(xcb_selection_clear_event_t* event)
 	return 0;
 }
 
-static int handle_xfixes_selection_notify(xcb_xfixes_selection_notify_event_t* event)
+static int handle_xfixes_selection_notify(xcb_xfixes_selection_notify_event_t*
+        event)
 {
 	DEBUG("handling xfixes_selection_notify");
 
@@ -428,6 +429,7 @@ static int handle_xfixes_selection_notify(xcb_xfixes_selection_notify_event_t* e
 static int handle_property_notify(xcb_property_notify_event_t* event)
 {
 	DEBUG("handling property_notify");
+
 	if (event->atom == atoms[XSEL_DATA]) {
 		DEBUG("XSEL_DATA property changed");
 	}
@@ -462,7 +464,7 @@ static int handle_events(xcb_generic_event_t* event)
 
 	default:
 		if (XCB_EVENT_RESPONSE_TYPE(event) ==
-		    xcb_extension_first_event + XCB_XFIXES_SELECTION_NOTIFY) {
+		        xcb_extension_first_event + XCB_XFIXES_SELECTION_NOTIFY) {
 			handle_xfixes_selection_notify((xcb_xfixes_selection_notify_event_t*)event);
 		}
 		else {
@@ -483,9 +485,9 @@ int selection_get(void)
 
 	xcb_discard_reply(xcb, xcb_xfixes_query_version(xcb, 1, 0).sequence);
 	xcb_xfixes_select_selection_input(xcb, xcbw, XCB_ATOM_PRIMARY,
-	             XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER |
-	             XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY |
-	             XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE);
+	                                  XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER |
+	                                  XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY |
+	                                  XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE);
 	xcb_flush(xcb);
 
 	while ((event = xcb_wait_for_event(xcb))) {
@@ -522,9 +524,11 @@ int check_xfixes(void)
 	const xcb_query_extension_reply_t* reply;
 
 	reply = xcb_get_extension_data(xcb, &xcb_xfixes_id);
-	if (!reply || !reply->present ) {
+
+	if (!reply || !reply->present) {
 		return -1;
 	}
+
 	xcb_extension_first_event = reply->first_event;
 
 	return 0;
