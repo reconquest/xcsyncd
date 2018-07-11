@@ -1,0 +1,6 @@
+# functional tests
+
+test_primary_to_clipboard: xcsyncd
+	test/test_simple_primary_to_clipboard.bash
+
+test: test_primary_to_clipboard

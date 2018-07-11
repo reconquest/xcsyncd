@@ -9,3 +9,5 @@ xcsyncd: main.c
 
 xcsyncd_debug: main.c
 	gcc -o $@ ${LIBS} ${C_DEBUG_FLAGS} $<
+
+include test/Makefile.test
