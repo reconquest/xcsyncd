@@ -1,5 +1,8 @@
 #!/usr/bin/bash
 
+# this test requires the MAX_INCR define to be less than 11 just to make xcsyncd
+# transfer the clipboard data in inctemential maner.
+
 DAEMON=$1
 timeout=0
 SIG=15		# SIGTERM
@@ -13,7 +16,7 @@ fi
 ./${DAEMON} &> /dev/null &
 DAEMON_PID=$!
 
-string="01234"
+string="0123456789012345678901234"
 xclip -in -selection primary <<< "$string"
 timeout 1 xclip -out -selection clipboard
 if [[ $? == 124 ]]

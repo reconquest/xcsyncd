@@ -26,7 +26,10 @@
 
 #define LENGTH(x) (sizeof(x)/sizeof(*(x)))
 #define ERRORS_NBR      256
+
+#ifndef MAX_INCR
 #define MAX_INCR        UINT_MAX
+#endif
 
 // types definitions
 

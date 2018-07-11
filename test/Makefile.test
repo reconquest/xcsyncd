@@ -1,6 +1,9 @@
 # functional tests
 
-test_primary_to_clipboard: xcsyncd
-	test/test_simple_primary_to_clipboard.bash
+test_primary_to_clipboard: xcsyncd_debug
+	test/test_simple_primary_to_clipboard.bash $<
 
-test: test_primary_to_clipboard
+test_incr_primary_to_clipboard: xcsyncd_debug
+	test/test_incremential_primary_to_clipboard.bash $<
+
+test: test_primary_to_clipboard test_incr_primary_to_clipboard
