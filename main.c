@@ -243,7 +243,8 @@ static int primary2clipboard(xcb_selection_notify_event_t* event)
 	                                    atoms[CLIPBOARD]),
 	            NULL);
 
-	if (reply != NULL && reply->owner == xcbw) {
+	if (reply == NULL || reply->owner != xcbw) {
+		DEBUG("Unable to own clipboard.");
 		ret = 1;
 		goto out;
 	}
@@ -354,6 +355,11 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 		return 1;
 	}
 
+	if (clipboard_data == NULL) {
+		DEBUG("We don't have anything in clipboard buffer.");
+		return 1;
+	}
+
 	notify_event.response_type = XCB_SELECTION_NOTIFY;
 	notify_event.target = event->target;
 	notify_event.requestor = event->requestor;
@@ -393,7 +399,7 @@ static int handle_selection_notify(xcb_selection_notify_event_t* event)
 		return 0;
 	}
 
-	if (!primary2clipboard(event)) {
+	if (primary2clipboard(event)) {
 		DEBUG("Can't own clipboard or get data.")
 		return 1;
 	}
