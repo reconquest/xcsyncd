@@ -320,11 +320,11 @@ static int _xcb_change_property(xcb_selection_notify_event_t* ev,
 	&(unsigned int) {
 		XCB_EVENT_MASK_PROPERTY_CHANGE
 	});
-	xcb_change_property(xcb, mode, ev->requestor, ev->property, atoms[INCR], 32, 1,
-	                    (unsigned char*)&bytes);
-	xcb_send_event(xcb, 0, ev->requestor, XCB_EVENT_MASK_NO_EVENT, (char*)ev);
+	xcb_change_property(xcb, mode, ev->requestor, ev->property,
+	                    atoms[INCR], format, MAX_INCR, data);
+	xcb_send_event(xcb, 0, ev->requestor, XCB_EVENT_MASK_NO_EVENT,
+	               (char*)ev);
 	xcb_flush(xcb);
-
 
 	incrtransfer incr;
 	incr.requestor = ev->requestor;
