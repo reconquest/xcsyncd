@@ -1,6 +1,6 @@
 CC=gcc
 
-C_DEBUG_FLAGS = -ggdb -DDEBUG_BUILD -DMAX_INCR=10
+C_DEBUG_FLAGS = -ggdb -DDEBUG_BUILD
 
 LIBS = -lxcb -lxcb-icccm -lxcb-util -lxcb-xfixes
 
