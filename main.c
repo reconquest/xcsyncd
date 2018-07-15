@@ -378,14 +378,10 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 		                            8, strlen(clipboard_data),
 		                            clipboard_data);
 	}
-	else if (event->target == atoms[STRING]) {
-		incr = _xcb_change_property(&notify_event, atoms[STRING],
-		                            8, strlen(clipboard_data),
-		                            clipboard_data);
-	}
 	else {
-		DEBUG("We don't handle this targets requests yet.");
-		return 1;
+		incr = _xcb_change_property(&notify_event, atoms[STRING],
+					    8, strlen(clipboard_data),
+					    clipboard_data);
 	}
 
 	if (!incr && incr != -1) {
