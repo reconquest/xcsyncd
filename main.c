@@ -371,7 +371,15 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 	notify_event.property = event->property;
 
 	if (event->target == atoms[UTF8_STRING]) {
+		// TODO: this is probably not a good work with utf8 string. I
+		// could have characrers bigger than 8-bits. We need to check
+		// how it works with 16/32-bits characters.
 		incr = _xcb_change_property(&notify_event, atoms[UTF8_STRING],
+		                            8, strlen(clipboard_data),
+		                            clipboard_data);
+	}
+	else if (event->target == atoms[STRING]) {
+		incr = _xcb_change_property(&notify_event, atoms[STRING],
 		                            8, strlen(clipboard_data),
 		                            clipboard_data);
 	}
