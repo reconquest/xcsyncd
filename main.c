@@ -52,6 +52,16 @@ struct incrtransfer {
 };
 typedef struct incrtransfer incrtransfer_t;
 
+struct selection {
+	char* name;
+	xcb_atom_t sel_atom;
+	xcb_atom_t* targets;
+	unsigned int targets_count;
+	xcb_window_t owner;
+	struct selection* sync_sel;
+};
+typedef struct selection selection_t;
+
 
 // global variables
 
@@ -61,12 +71,21 @@ static xcb_screen_t* xcb_screen;
 
 static uint8_t xcb_extension_first_event = 0;
 
+// selections
+
+enum {
+	SEL_PRIM = 0,
+	SEL_CLIP,
+	SELECTIONS_COUNT,
+};
+
+static selection_t selections[SELECTIONS_COUNT];
+
 // xcb atoms
 enum {
 	UTF8_STRING = 0,
 	STRING,
 	XSEL_DATA,
-	CLIPBOARD,
 	INCR,
 	TIMESTAMP,
 	TARGETS,
@@ -79,7 +98,6 @@ const char* atoms_names[] = {
 	"UTF8_STRING",
 	"STRING",
 	"XSEL_DATA",
-	"CLIPBOARD",
 	"INCR",
 	"TIMESTAMP",
 	"TARGETS",
@@ -99,6 +117,10 @@ void* clipboard_data;
 //static functions declarations
 
 static int handle_property_notify(xcb_property_notify_event_t* event);
+static void deinit_selections(void);
+
+
+// functions implementation
 
 static void init_window(void)
 {
@@ -123,29 +145,73 @@ static void init_window(void)
 	xcb_flush(xcb);
 }
 
-static int init_clipboard_protocol(void)
+static int get_atom(const char* atom_name, xcb_atom_t* atom)
 {
-	xcb_intern_atom_reply_t* reply;
-	xcb_intern_atom_cookie_t cookies[ATOMS_COUNT];
+	xcb_intern_atom_cookie_t cookie;
+	xcb_intern_atom_reply_t* reply = NULL;
 
-	memset(atoms, 0, sizeof(atoms));
-
-	for (int i = 0; i < ATOMS_COUNT; ++i) {
-		cookies[i] = xcb_intern_atom(xcb, 0, strlen(atoms_names[i]),
-		                             atoms_names[i]);
+	cookie = xcb_intern_atom(xcb, 0, strlen(atom_name),
+				     atom_name);
+	if (!(reply = xcb_intern_atom_reply(xcb, cookie, NULL))) {
+		return 1;
 	}
 
-	for (int i = 0; i < ATOMS_COUNT; ++i) {
-		if (!(reply = xcb_intern_atom_reply(xcb, cookies[i], NULL))) {
-			continue;
-		}
+	*atom = reply->atom;
+	DEBUG("%s = 0x%x", atom_name, reply->atom);
+	free(reply);
 
-		atoms[i] = reply->atom;
-		DEBUG("[%d] %s = 0x%x", i, atoms_names[i], reply->atom);
-		free(reply);
+	return 0;
+}
+
+static int init_selections(void)
+{
+	selection_t* prim = &selections[SEL_PRIM];
+	selection_t* clip = &selections[SEL_CLIP];
+
+	prim->name = strdup("PRIMARY");
+	if (get_atom(prim->name, &prim->sel_atom)) {
+		goto err_out;
+	}
+	prim->sync_sel = clip;
+
+	clip->name = strdup("CLIPBOARD");
+	if (get_atom(clip->name, &clip->sel_atom)) {
+		goto err_out;
+	}
+	clip->sync_sel = prim;
+
+	return 0;
+
+err_out:
+	deinit_selections();
+	return 1;
+}
+
+static int init_clipboard_protocol(void)
+{
+	// init atoms
+	memset(atoms, 0, sizeof(atoms));
+	for (int i = 0; i < ATOMS_COUNT; ++i) {
+		if (get_atom(atoms_names[i], &atoms[i])) {
+			return 1;
+		}
+	}
+
+	// init selections
+	if (init_selections()) {
+		return 1;
 	}
 
 	return 0;
+}
+
+static void deinit_selections(void) {
+	for (int i = 0; i < SELECTIONS_COUNT; ++i) {
+		if (selections[i].name) {
+			free(selections[i].name);
+			selections[i].name = NULL;
+		}
+	}
 }
 
 static int print_selection(xcb_window_t requestor, xcb_atom_t property)
@@ -239,20 +305,37 @@ out:
 	return string;
 }
 
-static int primary2clipboard(xcb_selection_notify_event_t* event)
+static selection_t* we_handle_selection(xcb_atom_t selection)
+{
+	for (int i = 0; i < SELECTIONS_COUNT; ++i) {
+		if (selections[i].sel_atom == selection) {
+			return &selections[i];
+		}
+	}
+
+	return NULL;
+}
+
+static int sync_selection(xcb_selection_notify_event_t* event)
 {
 	int ret = 0;
 	void* data = NULL;
 	size_t data_len = 0;
 
+	selection_t* sel = we_handle_selection(event->selection);
+	if (sel == NULL) {
+		return 0;
+	}
+	selection_t* sync_sel = sel->sync_sel;
+
 	xcb_get_selection_owner_reply_t* reply = NULL;
 
 	// own the clipboard
-	xcb_set_selection_owner(xcb, xcbw, atoms[CLIPBOARD], XCB_CURRENT_TIME);
+	xcb_set_selection_owner(xcb, xcbw, sync_sel->sel_atom, XCB_CURRENT_TIME);
 	reply = xcb_get_selection_owner_reply(
 	            xcb,
 	            xcb_get_selection_owner(xcb,
-	                                    atoms[CLIPBOARD]),
+	                                    sync_sel->sel_atom),
 	            NULL);
 
 	if (reply == NULL || reply->owner != xcbw) {
@@ -260,6 +343,7 @@ static int primary2clipboard(xcb_selection_notify_event_t* event)
 		ret = 1;
 		goto out;
 	}
+	sync_sel->owner = reply->owner;
 
 	// copy selection data
 	if (clipboard_data) {
@@ -360,7 +444,7 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 	int incr = 0;
 	xcb_selection_notify_event_t notify_event;
 
-	if (event->selection != atoms[CLIPBOARD]) {
+	if (event->selection != selections[SEL_CLIP].sel_atom) {
 		DEBUG("We don't handle requests for this selection: 0x%x.",
 		      event->selection);
 		return 1;
@@ -378,6 +462,8 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 	notify_event.time = event->time;
 	notify_event.property = event->property;
 
+	//TODO: write test that will check if daemon properly returns
+	//data of different types.
 	if (event->target == atoms[UTF8_STRING]) {
 		// TODO: this is probably not a good work with utf8 string. I
 		// could have characrers bigger than 8-bits. We need to check
@@ -412,16 +498,9 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 
 static int handle_selection_notify(xcb_selection_notify_event_t* event)
 {
-	// TODO: We can implement incremential copying of big selections, but do
-	// we really need to put it in clipboard? What if 100Gb of data there?
 	DEBUG("handling selection_notify");
 
-	if (event->selection != XCB_ATOM_PRIMARY ||
-	        event->property == XCB_NONE) {
-		return 0;
-	}
-
-	if (primary2clipboard(event)) {
+	if (sync_selection(event)) {
 		DEBUG("Can't own clipboard or get data.")
 		return 1;
 	}
@@ -440,14 +519,15 @@ static int handle_xfixes_selection_notify(xcb_xfixes_selection_notify_event_t*
 {
 	DEBUG("handling xfixes_selection_notify");
 
-	if (event->selection != XCB_ATOM_PRIMARY) {
+	selection_t* sel = we_handle_selection(event->selection);
+	if (sel == NULL) {
 		return 0;
 	}
 
 	// requesting for selection conversion to get the new value. Event
 	// will be handled in main event loop.
 	xcb_convert_selection(xcb, xcbw,
-	                      XCB_ATOM_PRIMARY, atoms[UTF8_STRING],
+	                      sel->sel_atom, atoms[UTF8_STRING],
 	                      atoms[XSEL_DATA], XCB_CURRENT_TIME);
 	xcb_flush(xcb);
 
@@ -505,17 +585,24 @@ static int handle_events(xcb_generic_event_t* event)
 	return 0;
 }
 
-int selection_get(void)
+int event_loop()
 {
 	xcb_generic_error_t* error = NULL;
 
 	xcb_generic_event_t* event;
 
 	xcb_discard_reply(xcb, xcb_xfixes_query_version(xcb, 1, 0).sequence);
-	xcb_xfixes_select_selection_input(xcb, xcbw, XCB_ATOM_PRIMARY,
-	                                  XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER |
-	                                  XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY |
-	                                  XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE);
+
+	uint32_t mask = XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER |
+	                XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY |
+	                XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE;
+	for (int i = 0; i < SELECTIONS_COUNT; ++i) {
+		if (selections[i].sel_atom) {
+			xcb_xfixes_select_selection_input(xcb, xcbw,
+			                                  selections[i].sel_atom,
+			                                  mask);
+		}
+	}
 	xcb_flush(xcb);
 
 	while ((event = xcb_wait_for_event(xcb))) {
@@ -581,7 +668,7 @@ int main()
 	init_window();
 	init_clipboard_protocol();
 
-	selection_get();
+	event_loop();
 
 	goto out;
 
