@@ -68,6 +68,10 @@ enum {
 	XSEL_DATA,
 	CLIPBOARD,
 	INCR,
+	TIMESTAMP,
+	TARGETS,
+	MULTIPLE,
+	TEXT,
 	ATOMS_COUNT,
 };
 
@@ -77,6 +81,10 @@ const char* atoms_names[] = {
 	"XSEL_DATA",
 	"CLIPBOARD",
 	"INCR",
+	"TIMESTAMP",
+	"TARGETS",
+	"MULTIPLE",
+	"TEXT",
 };
 
 static xcb_atom_t atoms[ATOMS_COUNT];
@@ -306,7 +314,6 @@ static int _xcb_change_property(xcb_selection_notify_event_t* ev,
 	}
 
 	bytes = size * format / 8;
-	DEBUG("check %zu bytes", bytes);
 
 	if (bytes < MAX_INCR) {
 		xcb_change_property(xcb, mode, ev->requestor,
@@ -378,16 +385,23 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 		incr = _xcb_change_property(&notify_event, atoms[UTF8_STRING],
 		                            8, strlen(clipboard_data),
 		                            clipboard_data);
+		DEBUG("UTF8 string sent: %s [%u]",
+		      (char*)clipboard_data, strlen((char*)clipboard_data));
 	}
-	else {
+	else if (event->target == atoms[STRING] ||
+		 event->target == atoms[TEXT])
+	{
 		incr = _xcb_change_property(&notify_event, atoms[STRING],
 					    8, strlen(clipboard_data),
 					    clipboard_data);
+		DEBUG("STRING sent: %s [%u]",
+		      (char*)clipboard_data, strlen((char*)clipboard_data));
+	}
+	else {
+		DEBUG("We don't handle this target yet (0x%x).", event->target);
 	}
 
 	if (!incr && incr != -1) {
-		DEBUG("sent: %s [%u]",
-		      (char*)clipboard_data, strlen((char*)clipboard_data));
 		xcb_send_event(xcb, 0, event->requestor,
 		               XCB_EVENT_MASK_NO_EVENT, (char*)&notify_event);
 		xcb_flush(xcb);
