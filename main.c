@@ -36,7 +36,7 @@
 /**
  * @brief This structure handles imformation about incremential transfer.
  */
-typedef struct incrtransfer {
+struct incrtransfer {
 	xcb_window_t requestor;
 	xcb_atom_t property;
 	xcb_atom_t selection;
@@ -49,7 +49,8 @@ typedef struct incrtransfer {
 	size_t max_size;
 	size_t chunk;
 	struct incrtransfer* next;
-} incrtransfer;
+};
+typedef struct incrtransfer incrtransfer_t;
 
 
 // global variables
@@ -81,7 +82,7 @@ const char* atoms_names[] = {
 static xcb_atom_t atoms[ATOMS_COUNT];
 
 // incremential transfers
-static incrtransfer* transfers;
+static incrtransfer_t* transfers;
 
 // selection data buffer
 void* clipboard_data;
@@ -271,25 +272,25 @@ out:
 	return ret;
 }
 
-static void add_incr(incrtransfer* incr)
+static void add_incr(incrtransfer_t* incr)
 {
-	incrtransfer* i;
+	incrtransfer_t* i;
 	incr->next = NULL;
 
 	for (i = transfers; i && i->next; i = i->next) {}
 
 	if (!i) {
-		i = transfers = malloc(sizeof(incrtransfer));
+		i = transfers = malloc(sizeof(incrtransfer_t));
 	}
 	else {
-		i = i->next = malloc(sizeof(incrtransfer));
+		i = i->next = malloc(sizeof(incrtransfer_t));
 	}
 
 	if (!i) {
 		return;
 	}
 
-	memcpy(i, incr, sizeof(incrtransfer));
+	memcpy(i, incr, sizeof(incrtransfer_t));
 }
 
 static int _xcb_change_property(xcb_selection_notify_event_t* ev,
@@ -326,7 +327,7 @@ static int _xcb_change_property(xcb_selection_notify_event_t* ev,
 	               (char*)ev);
 	xcb_flush(xcb);
 
-	incrtransfer incr;
+	incrtransfer_t incr;
 	incr.requestor = ev->requestor;
 	incr.property  = ev->property;
 	incr.selection = ev->selection;
