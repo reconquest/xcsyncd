@@ -288,6 +288,8 @@ static int sync_selection(xcb_selection_notify_event_t* event)
 		return 0;
 	}
 	selection_t* sync_sel = sel->sync_sel;
+	DEBUG("Selection: 0x%x; Sync selection: 0x%x",
+	      sel->sel_atom, sync_sel->sel_atom);
 
 	xcb_get_selection_owner_reply_t* reply = NULL;
 
@@ -306,19 +308,24 @@ static int sync_selection(xcb_selection_notify_event_t* event)
 	}
 	sync_sel->owner = reply->owner;
 
-	// copy selection data
-	if (clipboard_data) {
-		free(clipboard_data);
-		clipboard_data = NULL;
-	}
-
-	clipboard_data = fetch_selection(event->requestor, event->property,
+	// get selection data
+	data = fetch_selection(event->requestor, event->property,
 	                                 event->target, &data_len);
 
-	if (clipboard_data == NULL) {
+	// If no data in new selection -- let things be as they are.
+	if (data == NULL) {
+		DEBUG("Clipboard data is empty");
 		ret = 1;
 		goto out;
 	}
+
+	// If there is new data in selection, replace old data with new.
+	DEBUG("Freeing old clipboard data: %s", clipboard_data);
+
+	free(clipboard_data);
+	clipboard_data = data;
+
+	DEBUG("New clipboard data is: %s", clipboard_data);
 
 out:
 	free(reply);
@@ -411,17 +418,20 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 		return 1;
 	}
 
-	if (clipboard_data == NULL) {
-		DEBUG("We don't have anything in clipboard buffer.");
-		return 1;
-	}
-
 	notify_event.response_type = XCB_SELECTION_NOTIFY;
 	notify_event.target = event->target;
 	notify_event.requestor = event->requestor;
 	notify_event.selection = event->selection;
 	notify_event.time = event->time;
 	notify_event.property = event->property;
+
+	if (clipboard_data == NULL) {
+		DEBUG("We don't have anything in clipboard buffer.");
+		// TODO: what should we do if we can't send anything or can't
+		// convert data to requested type? Sending event without
+		// changing property works, but is it good behaviour?
+		goto send_event;
+	}
 
 	//TODO: write test that will check if daemon properly returns
 	//data of different types.
@@ -446,13 +456,17 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 	}
 	else {
 		DEBUG("We don't handle this target yet (0x%x).", event->target);
+		goto send_event;
 	}
 
-	if (!incr && incr != -1) {
-		xcb_send_event(xcb, 0, event->requestor,
-		               XCB_EVENT_MASK_NO_EVENT, (char*)&notify_event);
-		xcb_flush(xcb);
+	if (incr == -1) {
+		return 1;
 	}
+
+send_event:
+	xcb_send_event(xcb, 0, event->requestor,
+		       XCB_EVENT_MASK_NO_EVENT, (char*)&notify_event);
+	xcb_flush(xcb);
 
 	return 0;
 }
@@ -484,6 +498,7 @@ static int handle_xfixes_selection_notify(xcb_xfixes_selection_notify_event_t*
 	if (sel == NULL) {
 		return 0;
 	}
+	DEBUG("Selection: 0x%x", sel->sel_atom);
 
 	// requesting for selection conversion to get the new value. Event
 	// will be handled in main event loop.
