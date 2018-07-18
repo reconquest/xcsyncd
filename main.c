@@ -214,45 +214,6 @@ static void deinit_selections(void) {
 	}
 }
 
-static int print_selection(xcb_window_t requestor, xcb_atom_t property)
-{
-	xcb_generic_event_t* event = NULL;
-	xcb_icccm_get_text_property_reply_t prop;
-	xcb_get_property_cookie_t cookie =
-	    xcb_icccm_get_text_property(xcb, requestor, property);
-
-	if (xcb_icccm_get_text_property_reply(xcb, cookie, &prop, NULL)) {
-		//XXX: valgrind found the error here
-		DEBUG("Primary clipboard has: %s", prop.name);
-
-		xcb_icccm_get_text_property_reply_wipe(&prop);
-
-		xcb_delete_property(xcb, requestor, property);
-		xcb_flush(xcb);
-
-		event = xcb_wait_for_event(xcb);
-
-		if (event == NULL) {
-			DEBUG("Didn't received any events in print selection");
-			return 0;
-		}
-
-		if (XCB_EVENT_RESPONSE_TYPE(event) == XCB_PROPERTY_NOTIFY) {
-			DEBUG("Handling property notify from print selection.");
-			handle_property_notify((xcb_property_notify_event_t*)event);
-		}
-		else {
-			DEBUG("Received not PROPERTY_NOTIFY event: %d",
-			      XCB_EVENT_RESPONSE_TYPE(event));
-		}
-
-		free(event);
-		event = NULL;
-	}
-
-	return 0;
-}
-
 void* fetch_selection(xcb_window_t win, xcb_atom_t property, xcb_atom_t type,
                       size_t* len)
 {
