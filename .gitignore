@@ -1,3 +1,7 @@
-main.c.orig
-tags
-xcsyncd
+/main.c.orig
+/tags
+/xcsyncd
+/xcsyncd_debug
+/cmdline.c
+/cmdline.h
+/cmdline.o
