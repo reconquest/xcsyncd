@@ -11,11 +11,11 @@ ifndef GGO_EXISTS
 	$(error "There is no gengetopt on this system.")
 endif
 
-cmdline: xcsyncd.ggo check_gengetopt
+cmdline.o: xcsyncd.ggo check_gengetopt
 	gengetopt --input=xcsyncd.ggo
 	gcc -c -o cmdline.o cmdline.c
 
-xcsyncd: cmdline.o main.c 
+xcsyncd: cmdline.o main.c
 	gcc -o $@ ${LIBS} $^
 
 xcsyncd_debug: cmdline.o main.c
