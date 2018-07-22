@@ -18,6 +18,7 @@
 
 #include "lib/log.h"
 #include "lib/memory.h"
+#include "cmdline.h"
 
 /*
  * Most of the code I got from xcmenu, so there we can found some answers to
@@ -59,15 +60,28 @@ struct selection {
 	unsigned int targets_count;
 	xcb_window_t owner;
 	struct selection* sync_sel;
+	bool watch;
 };
 typedef struct selection selection_t;
 
+enum xcsync_mode {
+	BOTH_WAYS,
+	PRIM_TO_CLIP,
+	CLIP_TO_PRIM,
+};
+typedef enum xcsync_mode xcsync_mode_t;
+
+struct configuration {
+	xcsync_mode_t mode;
+};
+typedef struct configuration configuration_t;
 
 // global variables
 
 static xcb_connection_t* xcb;
 static xcb_window_t xcbw;
 static xcb_screen_t* xcb_screen;
+static configuration_t conf;
 
 static uint8_t xcb_extension_first_event = 0;
 
@@ -172,13 +186,21 @@ static int init_selections(void)
 	if (get_atom(prim->name, &prim->sel_atom)) {
 		goto err_out;
 	}
-	prim->sync_sel = clip;
+	if (conf.mode == BOTH_WAYS ||
+	    conf.mode == PRIM_TO_CLIP) {
+		prim->sync_sel = clip;
+		prim->watch = true;
+	}
 
 	clip->name = strdup("CLIPBOARD");
 	if (get_atom(clip->name, &clip->sel_atom)) {
 		goto err_out;
 	}
-	clip->sync_sel = prim;
+	if (conf.mode == BOTH_WAYS ||
+	    conf.mode == CLIP_TO_PRIM) {
+		clip->sync_sel = prim;
+		clip->watch = true;
+	}
 
 	return 0;
 
@@ -284,7 +306,7 @@ static int sync_selection(xcb_selection_notify_event_t* event)
 	size_t data_len = 0;
 
 	selection_t* sel = we_handle_selection(event->selection);
-	if (sel == NULL) {
+	if (sel == NULL || !sel->watch) {
 		return 0;
 	}
 	selection_t* sync_sel = sel->sync_sel;
@@ -625,9 +647,43 @@ int check_xfixes(void)
 	return 0;
 }
 
-int main()
+static int init_configuration(struct gengetopt_args_info* args_info)
+{
+	if (args_info->mode_given) {
+		switch (args_info->mode_arg) {
+			case mode_arg_BOTH_WAYS:
+				conf.mode = BOTH_WAYS;
+				break;
+			case mode_arg_PRIM_TO_CLIP:
+				conf.mode = PRIM_TO_CLIP;
+				break;
+			case mode_arg_CLIP_TO_PRIM:
+				conf.mode = CLIP_TO_PRIM;
+				break;
+			default:
+				return 1;
+		}
+	}
+
+	return 0;
+}
+
+int main(int argc, char* argv[])
 {
 	int ret = EXIT_SUCCESS;
+	struct gengetopt_args_info args_info;
+
+	// read command line parameters to configuration
+	if (cmdline_parser(argc, argv, &args_info)) {
+		ERR("Command line parsing failure.");
+		goto err_out;
+	}
+	if (init_configuration(&args_info)) {
+		ERR("Wrong command line parameters.");
+		goto err_out;
+	}
+	// free ggo structure
+	cmdline_parser_free(&args_info);
 
 	xcb = xcb_connect(NULL, NULL);
 
@@ -651,7 +707,10 @@ int main()
 err_out:
 	ret = EXIT_FAILURE;
 out:
-	xcb_disconnect(xcb);
+	if (xcb) {
+		xcb_disconnect(xcb);
+	}
+
 	return ret;
 }
 

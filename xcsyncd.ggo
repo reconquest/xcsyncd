@@ -1,0 +1,10 @@
+package "xcsyncd"
+version "0.1"
+purpose "Synchronize content of primary and clipboard selections"
+
+option "mode"           m "Synchronization mode."
+                          values="BOTH_WAYS","PRIM_TO_CLIP","CLIP_TO_PRIM"
+                          enum
+                          optional
+                          default="BOTH_WAYS"
+

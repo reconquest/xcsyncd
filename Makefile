@@ -4,10 +4,25 @@ C_DEBUG_FLAGS = -ggdb -DDEBUG_BUILD
 
 LIBS = -lxcb -lxcb-icccm -lxcb-util -lxcb-xfixes
 
-xcsyncd: main.c
-	gcc -o $@ ${LIBS} $<
+GGO_EXISTS := $(shell command -v gengetopt 2> /dev/null)
 
-xcsyncd_debug: main.c
-	gcc -o $@ ${LIBS} ${C_DEBUG_FLAGS} $<
+check_gengetopt:
+ifndef GGO_EXISTS
+	$(error "There is no gengetopt on this system.")
+endif
+
+cmdline: xcsyncd.ggo check_gengetopt
+	gengetopt --input=xcsyncd.ggo
+	gcc -c -o cmdline.o cmdline.c
+
+xcsyncd: cmdline.o main.c 
+	gcc -o $@ ${LIBS} $^
+
+xcsyncd_debug: cmdline.o main.c
+	gcc -o $@ ${LIBS} ${C_DEBUG_FLAGS} $^
+
+clean:
+	rm -rf *.o
+	rm xcsyncd xcsyncd_debug
 
 include test/Makefile.test
