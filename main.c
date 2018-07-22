@@ -299,11 +299,26 @@ static selection_t* find_selection(xcb_atom_t selection_atom)
 	return NULL;
 }
 
+static xcb_window_t _get_selection_owner(xcb_atom_t selection)
+{
+	xcb_get_selection_owner_reply_t* reply = NULL;
+	xcb_get_selection_owner_cookie_t cookie;
+
+	cookie = xcb_get_selection_owner(xcb, selection);
+	reply = xcb_get_selection_owner_reply( xcb, cookie, NULL);
+
+	if (reply == NULL) {
+		return XCB_NONE;
+	}
+
+	return reply->owner;
+}
+
 static int sync_selection(xcb_selection_notify_event_t* event)
 {
-	int ret = 0;
 	void* data = NULL;
 	size_t data_len = 0;
+	xcb_window_t owner = XCB_NONE;
 
 	selection_t* sel = find_selection(event->selection);
 	if (sel == NULL || !sel->watch) {
@@ -314,22 +329,15 @@ static int sync_selection(xcb_selection_notify_event_t* event)
 	DEBUG("Selection: 0x%x; Sync selection: 0x%x",
 	      sel->sel_atom, sync_sel->sel_atom);
 
-	xcb_get_selection_owner_reply_t* reply = NULL;
-
 	// own the clipboard
 	xcb_set_selection_owner(xcb, xcbw, sync_sel->sel_atom, XCB_CURRENT_TIME);
-	reply = xcb_get_selection_owner_reply(
-	            xcb,
-	            xcb_get_selection_owner(xcb,
-	                                    sync_sel->sel_atom),
-	            NULL);
-
-	if (reply == NULL || reply->owner != xcbw) {
-		DEBUG("Unable to own clipboard.");
-		ret = 1;
-		goto out;
+	
+	owner = _get_selection_owner(sync_sel->sel_atom);
+	if (owner != xcbw) {
+		ERR("Unable to own clipboard.");
+		return 1;
 	}
-	sync_sel->owner = reply->owner;
+	sync_sel->owner = owner;
 
 	// get selection data
 	data = fetch_selection(event->requestor, event->property,
@@ -338,8 +346,7 @@ static int sync_selection(xcb_selection_notify_event_t* event)
 	// If no data in new selection -- let things be as they are.
 	if (data == NULL) {
 		DEBUG("Clipboard data is empty");
-		ret = 1;
-		goto out;
+		return 1;
 	}
 
 	// If there is new data in selection, replace old data with new.
@@ -350,9 +357,7 @@ static int sync_selection(xcb_selection_notify_event_t* event)
 
 	DEBUG("New clipboard data is: %s", clipboard_data);
 
-out:
-	free(reply);
-	return ret;
+	return 0;
 }
 
 static void add_incr(incrtransfer_t* incr)
