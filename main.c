@@ -288,10 +288,10 @@ out:
 	return string;
 }
 
-static selection_t* we_handle_selection(xcb_atom_t selection)
+static selection_t* find_selection(xcb_atom_t selection_atom)
 {
 	for (int i = 0; i < SELECTIONS_COUNT; ++i) {
-		if (selections[i].sel_atom == selection) {
+		if (selections[i].sel_atom == selection_atom) {
 			return &selections[i];
 		}
 	}
@@ -305,10 +305,11 @@ static int sync_selection(xcb_selection_notify_event_t* event)
 	void* data = NULL;
 	size_t data_len = 0;
 
-	selection_t* sel = we_handle_selection(event->selection);
+	selection_t* sel = find_selection(event->selection);
 	if (sel == NULL || !sel->watch) {
 		return 0;
 	}
+
 	selection_t* sync_sel = sel->sync_sel;
 	DEBUG("Selection: 0x%x; Sync selection: 0x%x",
 	      sel->sel_atom, sync_sel->sel_atom);
@@ -432,10 +433,13 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 	DEBUG("handling selection_request");
 
 	int incr = 0;
+	selection_t* selection;
 	xcb_selection_notify_event_t notify_event;
 
-	if (event->selection != selections[SEL_CLIP].sel_atom) {
-		DEBUG("We don't handle requests for this selection: 0x%x.",
+	selection = find_selection(event->selection);
+	if (selection == NULL ||
+	    selection->owner != xcbw) {
+		ERR("We don't handle requests for this selection: 0x%x.",
 		      event->selection);
 		return 1;
 	}
@@ -516,10 +520,12 @@ static int handle_xfixes_selection_notify(xcb_xfixes_selection_notify_event_t*
 {
 	DEBUG("handling xfixes_selection_notify");
 
-	selection_t* sel = we_handle_selection(event->selection);
-	if (sel == NULL) {
+	selection_t* sel = find_selection(event->selection);
+	sel->owner = _get_selection_owner(event->selection);
+	if (sel->owner == xcbw) {
 		return 0;
 	}
+
 	DEBUG("Selection: 0x%x", sel->sel_atom);
 
 	// requesting for selection conversion to get the new value. Event
