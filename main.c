@@ -448,7 +448,7 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 	notify_event.property = event->property;
 
 	if (clipboard_data == NULL) {
-		DEBUG("We don't have anything in clipboard buffer.");
+		ERR("We don't have anything in clipboard buffer.");
 		// TODO: what should we do if we can't send anything or can't
 		// convert data to requested type? Sending event without
 		// changing property works, but is it good behaviour?
@@ -498,7 +498,7 @@ static int handle_selection_notify(xcb_selection_notify_event_t* event)
 	DEBUG("handling selection_notify");
 
 	if (sync_selection(event)) {
-		DEBUG("Can't own clipboard or get data.")
+		ERR("Can't own clipboard or get data.")
 		return 1;
 	}
 
@@ -606,7 +606,7 @@ int event_loop()
 	while ((event = xcb_wait_for_event(xcb))) {
 		// handling errors if any
 		if (event == NULL) {
-			DEBUG("xcb I/O error while waiting event");
+			ERR("xcb I/O error while waiting event");
 			return 1;
 		}
 
