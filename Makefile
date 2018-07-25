@@ -26,3 +26,7 @@ clean:
 	rm xcsyncd xcsyncd_debug
 
 include test/Makefile.test
+
+install: xcsyncd
+	mkdir -p $(DESTDIR)/usr/bin/
+	cp xcsyncd $(DESTDIR)/usr/bin/xcsyncd
