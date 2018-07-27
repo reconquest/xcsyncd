@@ -1,8 +1,5 @@
 #!/usr/bin/bash
 
-# this test requires the MAX_INCR define to be less than 11 just to make xcsyncd
-# transfer the clipboard data in inctemential maner.
-
 DAEMON=$1
 timeout=0
 SIG=15		# SIGTERM
@@ -13,7 +10,7 @@ then
 	exit 1
 fi
 
-./${DAEMON} &> /dev/null &
+./${DAEMON} --incr_max=11 &> /dev/null &
 DAEMON_PID=$!
 
 string="0123456789012345678901234"

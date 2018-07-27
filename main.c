@@ -28,10 +28,6 @@
 #define LENGTH(x) (sizeof(x)/sizeof(*(x)))
 #define ERRORS_NBR      256
 
-#ifndef MAX_INCR
-#define MAX_INCR        UINT_MAX
-#endif
-
 // types definitions
 
 /**
@@ -73,6 +69,7 @@ typedef enum xcsync_mode xcsync_mode_t;
 
 struct configuration {
 	xcsync_mode_t mode;
+	uint32_t incr_max;
 };
 typedef struct configuration configuration_t;
 
@@ -395,7 +392,7 @@ static int _xcb_change_property(xcb_selection_notify_event_t* ev,
 
 	bytes = size * format / 8;
 
-	if (bytes < MAX_INCR) {
+	if (bytes < conf.incr_max) {
 		xcb_change_property(xcb, mode, ev->requestor,
 		                    ev->property, target, format,
 		                    size, data);
@@ -409,7 +406,7 @@ static int _xcb_change_property(xcb_selection_notify_event_t* ev,
 		XCB_EVENT_MASK_PROPERTY_CHANGE
 	});
 	xcb_change_property(xcb, mode, ev->requestor, ev->property,
-	                    atoms[INCR], format, MAX_INCR, data);
+	                    atoms[INCR], format, conf.incr_max, data);
 	xcb_send_event(xcb, 0, ev->requestor, XCB_EVENT_MASK_NO_EVENT,
 	               (char*)ev);
 	xcb_flush(xcb);
@@ -424,7 +421,7 @@ static int _xcb_change_property(xcb_selection_notify_event_t* ev,
 	incr.data      = data;
 	incr.size      = size;
 	incr.offset    = 0;
-	incr.max_size  = MAX_INCR * 8 / format;
+	incr.max_size  = conf.incr_max * 8 / format;
 	incr.chunk = incr.max_size < incr.size - incr.offset ?
 	             incr.max_size : incr.size - incr.offset;
 	add_incr(&incr);

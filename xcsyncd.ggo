@@ -7,4 +7,8 @@ option "mode"           m "Synchronization mode."
                           enum
                           optional
                           default="BOTH_WAYS"
+option "incr_max"       i "The maximum size of buffer after which it should be sent in incremential manner."
+                          int
+                          optional
+                          default="65536"
 
