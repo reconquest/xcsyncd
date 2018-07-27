@@ -1,3 +1,5 @@
+/** @file */
+
 #include <limits.h>
 #include <assert.h>
 #include <stdio.h>
@@ -60,15 +62,42 @@ struct selection {
 };
 typedef struct selection selection_t;
 
+/**
+ * @brief xcsyncd modes enumeration
+ */
 enum xcsync_mode {
+	/**
+	 * synchronize both primary and clipboard selection with each other.
+	 */
 	BOTH_WAYS,
+	/**
+	 * follow primary selection changes and copy them into clipboard
+	 * selection
+	 */
 	PRIM_TO_CLIP,
+	/**
+	 * follow clipboard selection changes and copy tham into primary
+	 * selection
+	 */
 	CLIP_TO_PRIM,
 };
 typedef enum xcsync_mode xcsync_mode_t;
 
+/**
+ * @brief Struct which handles whole configuration.
+ *
+ * Now configuration fills from command line parameters.
+ */
 struct configuration {
+	/**
+	 * mode in which xcsyncd should work. Modes described in
+	 * @ref xcsync_mode
+	 */
 	xcsync_mode_t mode;
+	/**
+	 * the maximum selection size after which selection should be sent in
+	 * incremential manner.
+	 */
 	uint32_t incr_max;
 };
 typedef struct configuration configuration_t;
