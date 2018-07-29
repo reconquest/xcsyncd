@@ -511,6 +511,18 @@ static int handle_selection_request(xcb_selection_request_event_t* event)
 		DEBUG("STRING sent: %s [%u]",
 		      (char*)clipboard_data, strlen((char*)clipboard_data));
 	}
+	else if (event->target == atoms[TARGETS]) {
+		const xcb_atom_t targets[] = {
+			atoms[STRING],
+			atoms[UTF8_STRING],
+			atoms[TEXT],
+			atoms[TARGETS],
+		};
+		incr = _xcb_change_property(&notify_event, XCB_ATOM_ATOM,
+		                             32, sizeof(targets),
+		                             (unsigned char*) targets);
+		DEBUG("Available TARGETS sent.");
+	}
 	else {
 		DEBUG("We don't handle this target yet (0x%x).", event->target);
 		goto send_event;
@@ -701,6 +713,8 @@ static int init_configuration(struct gengetopt_args_info* args_info)
 				return 1;
 		}
 	}
+
+	conf.incr_max = args_info->incr_max_arg;
 
 	return 0;
 }
