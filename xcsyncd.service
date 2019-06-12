@@ -2,6 +2,7 @@
 Description=xorg clipboard syncrhonizer
 
 [Service]
+Environment=DISPLAY=:0
 ExecStart=/usr/bin/xcsyncd
 Restart=always
 
