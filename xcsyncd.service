@@ -1,0 +1,9 @@
+[Unit]
+Description=xorg clipboard syncrhonizer
+
+[Service]
+ExecStart=/usr/bin/xcsyncd
+Restart=always
+
+[Install]
+WantedBy=basic.target
