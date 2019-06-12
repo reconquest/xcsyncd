@@ -34,5 +34,6 @@ clean:
 include test/Makefile.test
 
 install: xcsyncd
-	mkdir -p $(DESTDIR)/usr/bin/
+	mkdir -p $(DESTDIR)/usr/bin/ $(DESTDIR)/usr/lib/systemd/user/
 	cp xcsyncd $(DESTDIR)/usr/bin/xcsyncd
+	cp xcsyncd.service $(DESTDIR)/usr/lib/systemd/user/
